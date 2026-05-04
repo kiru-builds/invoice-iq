@@ -57,7 +57,7 @@ async function extractInvoice(file){
   const content=isPDF
     ?[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:`Extract invoice data. Return ONLY JSON: {"vendor":"string","invoiceNumber":"string","date":"DD MMM YYYY","amount":number,"tax":number,"currency":"INR","category":"Software|Marketing|Operations|Travel|Food|Office|Legal|GST|Other","lineItems":[{"description":"string","amount":number}],"paymentTerms":"string","confidence":0-100}`}]
     :[{type:"image",source:{type:"base64",media_type:file.type,data:base64}},{type:"text",text:`Extract invoice data. Return ONLY JSON: {"vendor":"string","invoiceNumber":"string","date":"DD MMM YYYY","amount":number,"tax":number,"currency":"INR","category":"Software|Marketing|Operations|Travel|Food|Office|Legal|GST|Other","lineItems":[{"description":"string","amount":number}],"paymentTerms":"string","confidence":0-100}`}];
-  const res=await fetch("http://localhost:3001/api/extract",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:1500,messages:[{role:"user",content}]})});
+  const res=await fetch("https://invoice-iq-ievx.onrender.com/api/extract",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:1500,messages:[{role:"user",content}]})});
   const raw=await res.text();
   if(!res.ok) throw new Error("Server "+res.status+": "+raw.slice(0,100));
   const data=JSON.parse(raw);
@@ -284,7 +284,7 @@ function AIChat({invoices,onClose}){
 Invoice data: ${JSON.stringify(invoices.map(i=>({vendor:i.vendor,date:i.date,amount:i.amount,tax:i.tax,category:i.category,invoiceNumber:i.invoiceNumber})))}
 Stats: ${invoices.length} invoices, Total: ₹${invoices.reduce((s,i)=>s+(parseFloat(i.amount)||0),0).toLocaleString("en-IN")}, GST: ₹${invoices.reduce((s,i)=>s+(parseFloat(i.tax)||0),0).toLocaleString("en-IN")}
 Answer in 2-3 sentences max. Use ₹ for currency. Be specific with numbers.`;
-      const res=await fetch("http://localhost:3001/api/extract",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:300,messages:[{role:"user",content:ctx+"\n\nQuestion: "+q}]})});
+      const res=await fetch("https://invoice-iq-ievx.onrender.com/api/extract",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:300,messages:[{role:"user",content:ctx+"\n\nQuestion: "+q}]})});
       const raw=await res.json();
       const text=raw.content?.map(c=>c.text||"").join("")||"Sorry, I couldn't answer that.";
       setMsgs(p=>[...p,{role:"ai",text}]);
@@ -343,7 +343,7 @@ function GoogleSheetsSection({invoices,toast,S,C}){
   const saveWebhook=url=>{setWebhookUrl(url);localStorage.setItem("iq_webhook",url);};
 
   const sendToSheets=async invoice=>{
-    const res=await fetch("http://localhost:3001/api/sheets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({webhookUrl,invoice})});
+    const res=await fetch("https://invoice-iq-ievx.onrender.com/api/sheets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({webhookUrl,invoice})});
     const data=await res.json();
     if(!data.ok) throw new Error(data.error||"Failed");
   };
@@ -405,7 +405,7 @@ function EmailSection({invoices,toast,S,C}){
     if(!invoices.length) return toast("No invoices to send!","error");
     setSending(true);
     try{
-      const res=await fetch("http://localhost:3001/api/email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:email.trim(),invoices})});
+      const res=await fetch("https://invoice-iq-ievx.onrender.com/api/email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:email.trim(),invoices})});
       const data=await res.json();
       if(data.ok){toast("✅ Email sent to "+email,"success");setEmail("");}
       else throw new Error(data.error||"Failed");
