@@ -3,7 +3,7 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 
-// Load .env
+// ── Load .env ─────────────────────────────────────────────────────────────────
 const envPath = path.join(__dirname, ".env");
 if (fs.existsSync(envPath)) {
   fs.readFileSync(envPath, "utf8").split(/\r?\n/).forEach(line => {
@@ -11,20 +11,20 @@ if (fs.existsSync(envPath)) {
     if (eq > 0) {
       const k = line.slice(0, eq).trim();
       const v = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-      process.env[k] = v;
+      if (k) process.env[k] = v;
     }
   });
 }
 
-const API_KEY = process.env.VITE_ANTHROPIC_API_KEY;
+const API_KEY    = process.env.VITE_ANTHROPIC_API_KEY;
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_PASS = process.env.GMAIL_PASS;
 
 console.log("================================");
-console.log("  InvoiceIQ Server v3.0");
+console.log("  InvoiceIQ Server v3.1");
 console.log("================================");
-console.log("API Key:  ", API_KEY ? "YES ✅" : "NO ❌");
-console.log("Gmail:    ", GMAIL_USER ? "YES ✅ (" + GMAIL_USER + ")" : "NO ❌ (add to .env)");
+console.log("API Key:", API_KEY    ? "YES ✅" : "NO ❌");
+console.log("Gmail: ", GMAIL_USER  ? "YES ✅ (" + GMAIL_USER + ")" : "NO ❌ (add GMAIL_USER + GMAIL_PASS to .env)");
 console.log("================================\n");
 
 // ── CORS helper ───────────────────────────────────────────────────────────────
@@ -98,70 +98,82 @@ function callSheets(webhookUrl, payload) {
   });
 }
 
-// ── Gmail SMTP over TLS (no npm needed) ──────────────────────────────────────
+// ── Send Email via Resend API (works on all cloud servers) ───────────────────
 function sendGmail(to, subject, html) {
   return new Promise((resolve, reject) => {
-    if (!GMAIL_USER || !GMAIL_PASS) {
-      return reject(new Error("GMAIL_USER or GMAIL_PASS missing in .env file"));
-    }
+    const RESEND_KEY = process.env.RESEND_API_KEY;
+    
+    // Try Resend first (works on cloud), fallback to SMTP
+    if (RESEND_KEY) {
+      const payload = JSON.stringify({
+        from: "InvoiceIQ <onboarding@resend.dev>",
+        to: [to],
+        subject: subject,
+        html: html
+      });
 
-    const tls = require("tls");
-    let step = 0;
-    let buf = "";
-
-    const sock = tls.connect({ host: "smtp.gmail.com", port: 465 });
-    sock.setTimeout(20000);
-
-    const w = (s) => {
-      console.log("  SMTP →", s.split("\r\n")[0]);
-      sock.write(s + "\r\n");
-    };
-
-    const u64 = s => Buffer.from(s).toString("base64");
-
-    // Build email body
-    const msg = [
-      "From: InvoiceIQ <" + GMAIL_USER + ">",
-      "To: " + to,
-      "Subject: " + subject,
-      "MIME-Version: 1.0",
-      "Content-Type: text/html; charset=UTF-8",
-      "Content-Transfer-Encoding: quoted-printable",
-      "",
-      html
-    ].join("\r\n");
-
-    sock.on("data", (data) => {
-      buf += data.toString();
-      const lines = buf.split("\r\n");
-      buf = lines.pop();
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        console.log("  SMTP ←", line);
-        const code = parseInt(line.slice(0, 3));
-        const last = !line[3] || line[3] === " "; // last line of multi-line response
-
-        if (!last) continue; // wait for complete response
-
-        if      (step === 0 && code === 220) { w("EHLO smtp.gmail.com"); step = 1; }
-        else if (step === 1 && code === 250) { w("AUTH LOGIN"); step = 2; }
-        else if (step === 2 && code === 334) { w(u64(GMAIL_USER)); step = 3; }
-        else if (step === 3 && code === 334) { w(u64(GMAIL_PASS)); step = 4; }
-        else if (step === 4 && code === 235) { w("MAIL FROM:<" + GMAIL_USER + ">"); step = 5; }
-        else if (step === 5 && code === 250) { w("RCPT TO:<" + to + ">"); step = 6; }
-        else if (step === 6 && code === 250) { w("DATA"); step = 7; }
-        else if (step === 7 && code === 354) { w(msg + "\r\n."); step = 8; }
-        else if (step === 8 && code === 250) { w("QUIT"); sock.end(); resolve("Email sent to " + to); }
-        else if (code >= 400) {
-          sock.end();
-          reject(new Error("SMTP Error " + code + ": " + line));
+      const options = {
+        hostname: "api.resend.com",
+        path: "/emails",
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + RESEND_KEY,
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload)
         }
-      }
-    });
+      };
 
-    sock.on("timeout", () => { sock.end(); reject(new Error("SMTP timeout — check your app password")); });
-    sock.on("error", (e) => reject(new Error("SMTP connection error: " + e.message)));
+      const req = https.request(options, (res) => {
+        let data = "";
+        res.on("data", c => { data += c; });
+        res.on("end", () => {
+          console.log("📧 Resend response:", res.statusCode, data.slice(0, 100));
+          if (res.statusCode === 200 || res.statusCode === 201) {
+            resolve("Email sent via Resend to " + to);
+          } else {
+            reject(new Error("Resend error " + res.statusCode + ": " + data));
+          }
+        });
+      });
+
+      req.on("error", (e) => reject(new Error("Resend connection error: " + e.message)));
+      req.write(payload);
+      req.end();
+
+    } else if (GMAIL_USER && GMAIL_PASS) {
+      // Fallback: SMTP for local development
+      const tls = require("tls");
+      let step = 0, buf = "";
+      const sock = tls.connect({ host: "smtp.gmail.com", port: 465 });
+      sock.setTimeout(20000);
+      const w = s => { sock.write(s + "\r\n"); };
+      const u64 = s => Buffer.from(s).toString("base64");
+      const msg = ["From: InvoiceIQ <" + GMAIL_USER + ">","To: " + to,"Subject: " + subject,"MIME-Version: 1.0","Content-Type: text/html; charset=UTF-8","",html].join("\r\n");
+      sock.on("data", data => {
+        buf += data.toString();
+        const lines = buf.split("\r\n"); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const code = parseInt(line.slice(0,3));
+          const last = !line[3] || line[3] === " ";
+          if (!last) continue;
+          if (step===0&&code===220){w("EHLO smtp.gmail.com");step=1;}
+          else if(step===1&&code===250){w("AUTH LOGIN");step=2;}
+          else if(step===2&&code===334){w(u64(GMAIL_USER));step=3;}
+          else if(step===3&&code===334){w(u64(GMAIL_PASS));step=4;}
+          else if(step===4&&code===235){w("MAIL FROM:<"+GMAIL_USER+">");step=5;}
+          else if(step===5&&code===250){w("RCPT TO:<"+to+">");step=6;}
+          else if(step===6&&code===250){w("DATA");step=7;}
+          else if(step===7&&code===354){w(msg+"\r\n.");step=8;}
+          else if(step===8&&code===250){w("QUIT");sock.end();resolve("Email sent via SMTP");}
+          else if(code>=400){sock.end();reject(new Error("SMTP Error "+code+": "+line));}
+        }
+      });
+      sock.on("timeout",()=>{sock.end();reject(new Error("SMTP timeout"));});
+      sock.on("error",e=>reject(new Error("SMTP error: "+e.message)));
+    } else {
+      reject(new Error("No email configured. Add RESEND_API_KEY to Render environment variables."));
+    }
   });
 }
 
