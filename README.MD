@@ -25,6 +25,18 @@ Transform invoices and receipts into structured data in seconds using Claude AI
 
 ---
 
+
+
+##screenshot
+
+![Dashboard](invoice-dashboard-1.png)
+![Dashboard](invoice-dashboard-2.png)
+![Dashboard](invoice-dashboard-3.png)
+
+
+
+
+
 ## 🎯 What is InvoiceIQ?
 
 *InvoiceIQ* is a full-stack AI-powered invoice automation platform that helps businesses extract, organise, and analyse financial documents instantly. Upload any invoice or receipt — PDF or image — and get clean structured data with vendor details, amounts, GST breakdown, and category classification in seconds.
